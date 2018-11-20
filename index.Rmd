@@ -1,0 +1,406 @@
+---
+title: "Open Data & R"
+subtitle: ""
+author: "Thomas Lo Russo"
+date: "Universität Zürich </br> 21.11.2018"
+output:
+  xaringan::moon_reader:
+    css: lib/zh.css
+    nature:
+      highlightStyle: github
+      highlightLines: true
+      countIncrementalSlides: false
+      ratio: "16:9"
+---
+class: middle center
+
+## About me
+
+Research Associate 
+
+Official Statistics & Open Government Data 
+
+Canton of Zurich
+
+#### [open.zh.ch](open.zh.ch/)
+
+#### [statistik.zh.ch](statistik.zh.ch/)
+
+`r icon::fa("twitter")`[@thlorusso](https://twitter.com/thlorusso)
+
+---
+# The challenges of data aquisition
+
+- getting data is a critical step in most research 
+
+- sometimes one of the most difficult and time-consuming steps 
+
+- even when data is accessible not granted that it is easy to find 
+
+- frustrating format variabilities & compatibility issues 
+
+Not only hindering academic research, but also the development of innovative data-driven products & services.
+
+---
+
+# Open Data to the rescue
+
+__Open Data can contribute to making data aquisition much less painful__
+
+- machine readable, freely accessible & published in open formats with open license  
+
+- searchable on open data portals (e.g. [opendata.swiss](https://opendata.swiss/de/) / [data.europa.eu](http://data.europa.eu/) / [opentransportdata.swiss](https://opentransportdata.swiss/en/) / [opendata.cern.ch](http://opendata.cern.ch/))
+
+--
+
+Also, there are many ongoing efforts to make it easier to retrieve data directly from (open) repositories with the same tools that are used for analysis. Initatives such as __rOpenSci__ contribute heavily to this ("open tools for open science").
+
+In the case of __R__ → growing number of (open) data-packages and API-wrappers.
+
+<img src="https://avatars3.githubusercontent.com/u/1200269?v=3&s=280" alt="drawing" width="7%"/>
+
+https://ropensci.org/
+
+---
+# What is `r icon::fa("r-project")`?
+
+- programming language  
+- open source  
+- runs on multiple platforms  
+
+
+The R package - ecosystem comprehends a myriad of packages that extend the functionality of the R language. They range from data-manipulation, data-collection and visualization to modelling, GIS as well as many domain specific applications.
+
+
+__Field Guide to the R Ecosystem__  
+
+https://fg2re.sellorm.com/whatisr.html
+
+---
+class: inverse, center, middle
+
+<img src="lib/rknife.png" alt="drawing" width="50%"/>
+
+---
+With R you can create fully reproducible documents in various formats, books, presentations, blogposts or even build web-applications that let others explore data interactively.
+
+<center><img src="lib/R.png" alt="drawing" width="30%"/></center>
+
+---
+# Open Data & R 
+
+- __R__ (and similar open source software) lowers the barriers and costs to make data analysis __repeatable and reproducible__.
+
+- __Open Data__ ensures that everyone can access the same information for free (ideally, in a well structured manner)
+
+→ __Democratization of data & tools for analysis__
+
+--
+
+However, it is not always possible to use open data (sensitive data, privacy & security reasons) and open source software (special formats).
+
+But whenever it is possible, their combination allows for __reproducibilty__, __repeatability__ as well as __collaboration on unprecedentend scale__
+
+---
+class: centre, middle
+
+<center><a href="https://twitter.com/RTreb/status/1063717277001023490"><img src="lib/tweet.PNG" alt="tweet" height="50%"/></a></center>
+
+
+---
+class: inverse, center, middle
+
+# R & Open Government Data 
+
+### Showcase : Real Time Data-Service of Vote Results in the Canton Zurich
+
+---
+The Canton of Zurich provides a web service for real time results on voting sundays.
+https://opendata.swiss/de/dataset/echtzeitdaten-am-abstimmungstag
+
+```{r,message=FALSE,warning=FALSE}
+library(sf)
+library(tidyverse)
+
+# get json via webservice, dataset-description : https://opendata.swiss/de/dataset/echtzeitdaten-am-abstimmungstag
+data <- jsonlite::fromJSON("http://www.wahlen.zh.ch/abstimmungen/2016_09_25/viewer_download.php")
+
+# transform nested list into an R-friendly dataframe
+data <- data %>% 
+  map_dfr(bind_rows) %>% 
+  unnest(VORLAGEN)
+
+```
+
+
+---
+Some data preparation...
+```{r,message=FALSE,warning=FALSE, message=FALSE, dpi=100, fig.height=2}
+#short labels for each vote topic
+data$VORLAGE_NAME <- factor(data$VORLAGE_NAME, labels = c("Grüne Wirtschaft", "AHV Plus", "NDG", "Bezahlbare Kinderbetreuung"))
+
+data <-data %>% mutate_at(vars(JA_STIMMEN_ABSOLUT,NEIN_STIMMEN_ABSOLUT,JA_PROZENT,STIMMBETEILIGUNG),as.numeric)
+
+#aggregate results on municipality level
+data <-data %>% 
+  group_by(BFS,VORLAGE_NAME) %>% 
+  summarize(ja_anteil=round(sum(JA_STIMMEN_ABSOLUT,na.rm=T)/sum(JA_STIMMEN_ABSOLUT+NEIN_STIMMEN_ABSOLUT,na.rm=T)*100,1))
+```
+
+---
+
+Let's take a glimpse at the distribution of yes-shares across municipalities and voting topics.
+.pull-left[
+```{r, dpi=120, warning=FALSE, message=FALSE}
+plot<-ggplot(data, aes(x=ja_anteil)) + 
+              geom_histogram(fill="steelblue")+
+              facet_wrap(~VORLAGE_NAME)+
+              scale_x_continuous(limits = c(0, 100),breaks=seq(0,100,25))
+```
+]
+--
+
+.pull-right[
+
+```{r, warnings=FALSE, dpi=90,message=FALSE,echo=FALSE}
+plot
+```
+
+]
+
+---
+
+.pull-left[
+
+By adding geodata (municipality borders), we can visualize the results on a map.
+
+```{r,message=FALSE,warning=FALSE}
+# get municipality-borders shapefile
+downloader::download("http://www.web.statistik.zh.ch/cms_basiskarten/gen_Gemeinde_2017/GEN_A4_GEMEINDEN_SEEN_2017_F.zip", dest="dataset.zip", mode="wb")
+
+unzip("dataset.zip")
+
+gemeinden <- sf::read_sf("GEN_A4_GEMEINDEN_SEEN_2017_F" ,stringsAsFactors = FALSE) %>% select(BFS,BEZIRK)
+
+#join geodata to the vote result dataframe
+mapdata <- inner_join(gemeinden,data, by=c("BFS")) 
+
+#map displaying yes-shares per municpality
+map <- ggplot(mapdata)+
+  geom_sf(aes(fill=ja_anteil),colour="white")+
+  facet_wrap(~VORLAGE_NAME)
+```
+]
+
+--
+
+.pull-right[
+
+```{r, dpi=120}
+map
+```
+
+]
+
+---
+
+.pull-left[
+
+```{r,message=FALSE,warning=FALSE, dpi=125}
+
+mapnew <- map+
+              coord_sf(datum = NA)+ #<<
+              labs(fill="Ja (in %)")+#<<
+              theme_void()+ #<<
+              scale_fill_gradient2(midpoint=50)+ #<<
+              guides(fill = guide_colourbar(barwidth = 0.5, barheight = 10)) #<<
+
+```
+]
+
+--
+
+.pull-right[
+
+```{r,echo=FALSE, dpi=120}
+mapnew
+```
+
+]
+
+---
+
+```{r}
+
+glimpse(mapdata)
+
+```
+
+Thanks to the [sf-package](https://r-spatial.github.io/sf/) we can store the actual data as well as the needed geo-information in the same tabular dataframe.
+
+---
+Let's add some data to try to explain the results of a specific vote.
+```{r}
+# https://opendata.swiss/de/dataset/bevolkerung-pers -> population
+bev <- read.csv("http://www.web.statistik.zh.ch/ogd/data/KANTON_ZUERICH_133.csv", sep=";", encoding="UTF8") %>%
+  select(BFS = `ï..BFS_NR`, einwohner=INDIKATOR_VALUE,INDIKATOR_JAHR,GEBIET_NAME) %>% 
+  dplyr::filter(INDIKATOR_JAHR==2017 & BFS != 0)
+
+# https://opendata.swiss/de/dataset/nrw-wahleranteil-sp -> social democrats vote share
+sp <- read.csv("http://www.web.statistik.zh.ch/ogd/data/KANTON_ZUERICH_124.csv", sep=";", encoding="UTF8") %>%
+  select(BFS = `ï..BFS_NR`, sp_anteil=INDIKATOR_VALUE,INDIKATOR_JAHR) %>% 
+  dplyr::filter(INDIKATOR_JAHR==2015 & BFS != 0)
+
+# join to vote-results
+plotdata <- mapdata %>% 
+            filter(VORLAGE_NAME=="Bezahlbare Kinderbetreuung") %>% 
+            left_join(sp, by=c("BFS")) %>% 
+            left_join(bev, by=c("BFS")) %>% 
+            mutate_at(vars(sp_anteil,einwohner),as.numeric) 
+```
+
+
+---
+
+.pull-left[
+```{r,warnings=FALSE,message=FALSE}
+# devtools::install_github("statistikZH/statR")
+library(statR)
+
+plot <- ggplot(plotdata, aes(sp_anteil,ja_anteil, size=einwohner/1000))+
+            geom_point(colour="steelblue",alpha=0.8)+
+            theme_stat()+
+            guides(fill="FALSE")+
+            labs(title="Bezahlbare Kinderbetreuung",
+                 subtitle="Zustimmung zur VI bezahlbare Kinderbetreuung vs SP-Wähleranteil (NRW 2015)",
+                 size="Einwohner (in '000)", x="SP-Wähleranteil (%)",y="Ja-Anteil (%)")
+
+```
+]
+
+--
+
+.pull-right[
+```{r,warnings=FALSE, dpi=120,message=FALSE}
+plot
+```
+]
+
+---
+class: inverse, middle, center
+
+
+## Every step, from data-retrieval to the final visualizations, is repeatable AND reproducible
+
+--
+
+`r icon::fa("arrow-down")`
+# TRUST
+
+---
+
+## How does this work?
+
+- With [RMarkdown](https://rmarkdown.rstudio.com/), narrative text and code are part of the same document. We can weave elegantly formated output, such as this very presentation, from it.
+
+- By recurring to freely available (open) data sources the data is integrated just by linking to it (stable URL / API).
+
+---
+class: inverse, middle,center
+
+# Interactive Graphics & 
+# Web Applications with R
+
+---
+
+.pull-left[
+With just a few lines of code, we can visualize the yes-shares on an interactive map.
+
+```{r,message=FALSE,warning=FALSE}
+library(tmap)
+
+tmap_mode("view")
+
+tm <- tm_shape(mapdata)+ 
+      tm_fill("ja_anteil",breaks=seq(0,100,10), 
+              palette = "-Blues",title = "Ja-Anteil (%)")
+
+```
+]
+--
+.pull-right[
+```{r}
+tm
+```
+]
+
+---
+# Building a Web-App with R
+
+<img src="lib/shiny.jpg" alt="drawing" width="10%"/>
+
+Shiny-Apps let others interact with your data and your analysis. We can use Shiny to build an R powered Web-Application on top of the real time vote result data stream.
+
+https://statistikzh.shinyapps.io/zhvote/
+
+--
+- The app is automatically updated, as soon as a new vote date is listed, via the opendata.swiss [CKAN Action API](https://handbook.opendata.swiss/support/api.html)
+--
+
+- No need to update by hand __before__ votation sundays
+--
+
+- Real time data stream __on__ votation sundays
+--
+
+- No web development skills required
+
+code: https://github.com/openZH/zhvote_app
+
+---
+class: inverse, middle, center
+
+# Conclusion
+
+__To use R and | or Open Data for analysis helps in terms of:__
+
+## Reproducibilty
+## Repeatability
+## Much simpler collaboration 
+## New possibilities
+
+---
+class: middle, center
+
+## Data of the Canton of Zurich on opendata.swiss
+https://opendata.swiss/de/organization/kanton-zuerich
+
+
+---
+#### Resources : Open Data & R
+
+[rOpenSci-TaskView on how to obtain, parse, create and share OpenData](https://github.com/ropensci/opendata)
+
+[Open Data in R and rOpenSci](https://nceas.github.io/oss-lessons/open-data-in-r/open-data-in-R.html)
+
+[The Antarctic/Southern Ocean rOpenSci community](https://ropensci.org/blog/2018/11/13/antarctic/)
+
+#### Are you new to R?
+
+[Getting Started with R](https://support.rstudio.com/hc/en-us/articles/201141096-Getting-Started-with-R)
+
+
+---
+class: middle, center
+
+## Upcoming : Zurich R User Group Meetup
+
+### R programming with Martin Mächler
+
+Wednsday, 5. December 2018
+
+https://www.meetup.com/de-DE/Zurich-R-User-Group/
+
+![rusergroup](https://secure.meetupstatic.com/photos/event/c/e/3/0/600_466012784.jpeg)
+
+
